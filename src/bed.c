@@ -253,6 +253,7 @@ bed_open(struct pio_bed_file_t *bed_file, const char *path, size_t num_loci, siz
     row_size_bytes = bed_header_row_size( &bed_file->header ); 
     bed_file->read_buffer = ( snp_t * ) malloc( row_size_bytes );
     bed_file->cur_row = 0;
+    bed_file->skip_row = 0;
 
     return PIO_OK;
 }
@@ -284,6 +285,7 @@ bed_create(struct pio_bed_file_t *bed_file, const char *path, size_t num_samples
     row_size_bytes = bed_header_row_size( &bed_file->header );
     bed_file->read_buffer = ( snp_t * ) malloc( row_size_bytes );
     bed_file->cur_row = 0;
+    bed_file->skip_row = 0;
 
     return PIO_OK;
 }
@@ -293,6 +295,10 @@ bed_write_row(struct pio_bed_file_t *bed_file, snp_t *buffer)
 {
     int row_size_bytes;
     int bytes_written;
+
+    if ( bed_file->skip_row > 0 ) {
+        return PIO_ERROR;
+    }
 
     pack_snps( buffer, bed_file->read_buffer, bed_header_num_cols( &bed_file->header ) );
     row_size_bytes = bed_header_row_size( &bed_file->header );
@@ -318,12 +324,22 @@ bed_read_row(struct pio_bed_file_t *bed_file, snp_t *buffer)
     size_t row_size_bytes;
     size_t bytes_read;
 
-    if( feof( bed_file->fp ) != 0 || bed_file->cur_row >= bed_header_num_rows( &bed_file->header ) )
+    if( feof( bed_file->fp ) != 0 || (bed_file->cur_row + bed_file->skip_row) >= bed_header_num_rows( &bed_file->header ) )
     {
         return PIO_END;
     }
 
     row_size_bytes = bed_header_row_size( &bed_file->header );
+    if ( bed_file->skip_row > 0 )
+    {
+        if( fseek( bed_file->fp, bed_file->skip_row * row_size_bytes, SEEK_CUR ) ) {
+            return PIO_ERROR;
+        }
+
+        bed_file->cur_row += bed_file->skip_row;
+        bed_file->skip_row = 0;
+    }
+
     bytes_read = fread( bed_file->read_buffer, 
                         1,
                         row_size_bytes,
@@ -344,20 +360,12 @@ bed_read_row(struct pio_bed_file_t *bed_file, snp_t *buffer)
 pio_status_t
 bed_skip_row(struct pio_bed_file_t *bed_file)
 {
-    size_t row_size_bytes;
-    size_t bytes_read;
-
-    if( feof( bed_file->fp ) != 0 || bed_file->cur_row >= bed_header_num_rows( &bed_file->header ) )
+    if( feof( bed_file->fp ) != 0 || (bed_file->cur_row + bed_file->skip_row) >= bed_header_num_rows( &bed_file->header ) )
     {
         return PIO_END;
     }
 
-    row_size_bytes = bed_header_row_size( &bed_file->header );
-    if( fseek( bed_file->fp, row_size_bytes, SEEK_CUR ) ) {
-        return PIO_ERROR;
-    }
-
-    bed_file->cur_row++;
+    bed_file->skip_row++;
 
     return PIO_OK;
 }
@@ -385,6 +393,7 @@ bed_reset_row(struct pio_bed_file_t *bed_file)
 {
     fseek( bed_file->fp, bed_header_data_offset( &bed_file->header ), SEEK_SET );
     bed_file->cur_row = 0;
+    bed_file->skip_row = 0;
 }
 
 void

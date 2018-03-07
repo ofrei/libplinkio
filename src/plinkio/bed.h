@@ -48,6 +48,11 @@ struct pio_bed_file_t
      * Index of the current row.
      */
     size_t cur_row;
+
+    /**
+     * Number of rows to skip.
+     */
+    size_t skip_row;
 };
 
 /**
